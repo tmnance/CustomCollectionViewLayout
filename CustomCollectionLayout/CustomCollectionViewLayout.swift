@@ -9,8 +9,9 @@
 import UIKit
 
 class CustomCollectionViewLayout: UICollectionViewLayout {
-
-    let numberOfColumns = 8
+    lazy var numberOfColumns: Int = {
+        return collectionView?.numberOfItems(inSection: 0) ?? 0
+    }()
     var shouldPinFirstColumn = true
     var shouldPinFirstRow = true
 
@@ -28,31 +29,66 @@ class CustomCollectionViewLayout: UICollectionViewLayout {
         }
 
         if itemAttributes.count != collectionView.numberOfSections {
+            // first pass, generate initial values
             generateItemAttributes(collectionView: collectionView)
             return
         }
 
-        for section in 0..<collectionView.numberOfSections {
-            for item in 0..<collectionView.numberOfItems(inSection: section) {
-                if section != 0 && item != 0 {
-                    continue
-                }
+//        // update pass, only need to update frozen rows/cols
+//        for section in 0..<collectionView.numberOfSections {
+//            for item in 0..<numberOfColumns {
+//                if section != 0 && item != 0 {
+//                    continue
+//                }
+//
+//                let attributes = layoutAttributesForItem(
+//                    at: IndexPath(item: item, section: section)
+//                    )!
+//
+//                if section == 0 {
+//                    attributes.frame.origin.y = max(
+//                        collectionView.contentOffset.y,
+//                        0
+//                    )
+//                }
+//                if item == 0 {
+//                    attributes.frame.origin.x =
+//                        min(
+//                            collectionView.contentOffset.x +
+//                                collectionView.frame.width -
+//                                attributes.frame.width,
+//                            contentSize.width - attributes.frame.width
+//                    )
+//                }
+//            }
+//        }
 
-                let attributes = layoutAttributesForItem(at: IndexPath(item: item, section: section))!
-                if section == 0 {
-                    var frame = attributes.frame
-                    frame.origin.y = collectionView.contentOffset.y
-                    attributes.frame = frame
-                }
-
-                if item == 0 {
-                    var frame = attributes.frame
-                    frame.origin.x = collectionView.contentOffset.x
-                    attributes.frame = frame
-                }
-            }
+        // update pass, only need to update frozen rows/cols
+        for rowIndex in 0..<collectionView.numberOfSections {
+//            let attributes = layoutAttributesForItem(
+//                at: IndexPath(item: 0, section: rowIndex)
+//                )!
+            let attributes = itemAttributes[rowIndex][0]
+            attributes.frame.origin.x =
+                min(
+                    collectionView.contentOffset.x +
+                        collectionView.frame.width -
+                        attributes.frame.width,
+                    contentSize.width - attributes.frame.width
+            )
         }
 
+        let newY = max(
+            collectionView.contentOffset.y,
+            0
+        )
+        for colIndex in 0..<numberOfColumns {
+//            let attributes = layoutAttributesForItem(
+//                at: IndexPath(item: colIndex, section: 0)
+//            )!
+            let attributes = itemAttributes[0][colIndex]
+            attributes.frame.origin.y = newY
+        }
     }
 
     override var collectionViewContentSize: CGSize {
@@ -79,12 +115,11 @@ class CustomCollectionViewLayout: UICollectionViewLayout {
     override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
         return true
     }
-
 }
+
 
 // MARK: - Helpers
 extension CustomCollectionViewLayout {
-
     func generateItemAttributes(collectionView: UICollectionView) {
         if itemsSize.count != numberOfColumns {
             calculateItemSizes()
@@ -94,50 +129,63 @@ extension CustomCollectionViewLayout {
         var xOffset: CGFloat = 0
         var yOffset: CGFloat = 0
         var contentWidth: CGFloat = 0
+        var frozenColWidth: CGFloat = 0
 
         itemAttributes = []
 
-        for section in 0..<collectionView.numberOfSections {
+        for rowIndex in 0..<collectionView.numberOfSections {
             var sectionAttributes: [UICollectionViewLayoutAttributes] = []
 
-            for index in 0..<numberOfColumns {
-                let itemSize = itemsSize[index]
-                let indexPath = IndexPath(item: index, section: section)
+            for colIndex in 0..<numberOfColumns {
+                let itemSize = itemsSize[colIndex]
+                let indexPath = IndexPath(item: colIndex, section: rowIndex)
                 let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
-                attributes.frame = CGRect(x: xOffset, y: yOffset, width: itemSize.width, height: itemSize.height).integral
+                attributes.frame = CGRect(
+                    x: xOffset,
+                    y: yOffset,
+                    width: itemSize.width,
+//                    width: colIndex == 0 && rowIndex % 2 == 1 ?
+//                        collectionView.frame.width :
+//                        itemSize.width,
+                    height: rowIndex == 0 ? CGFloat(40) : itemSize.height
+                ).integral
+                attributes.transform = CGAffineTransform(scaleX: -1, y: 1)
 
-                if section == 0 && index == 0 {
+                if rowIndex == 0 && colIndex == 0 {
                     // First cell should be on top
                     attributes.zIndex = 1024
-                } else if section == 0 || index == 0 {
+                } else if rowIndex == 0 || colIndex == 0 {
                     // First row/column should be above other cells
                     attributes.zIndex = 1023
                 }
 
-                if section == 0 {
-                    var frame = attributes.frame
-                    frame.origin.y = collectionView.contentOffset.y
-                    attributes.frame = frame
+                if rowIndex == 0 {
+                    attributes.frame.origin.y = collectionView.contentOffset.y
                 }
-                if index == 0 {
-                    var frame = attributes.frame
-                    frame.origin.x = collectionView.contentOffset.x
-                    attributes.frame = frame
+                if colIndex == 0 {
+                    attributes.frame.origin.x =
+                        collectionView.contentOffset.x +
+                        collectionView.frame.width -
+                        attributes.frame.width
+                    frozenColWidth = attributes.frame.width
                 }
 
                 sectionAttributes.append(attributes)
 
-                xOffset += itemSize.width
+                if colIndex > 0 {
+                    xOffset += attributes.frame.width
+                }
                 column += 1
 
-                if column == numberOfColumns {
+                if colIndex == numberOfColumns - 1 {
+                    xOffset += frozenColWidth
                     if xOffset > contentWidth {
                         contentWidth = xOffset
                     }
 
                     column = 0
                     xOffset = 0
-                    yOffset += itemSize.height
+                    yOffset += attributes.frame.height
                 }
             }
 
@@ -165,12 +213,13 @@ extension CustomCollectionViewLayout {
             text = "MMM-99"
 
         default:
-            text = "Content"
+            text = "☑️"
         }
 
-        let size: CGSize = text.size(attributes: [NSFontAttributeName: UIFont.systemFont(ofSize: 14.0)])
+        let size: CGSize = text.size(
+            withAttributes: [NSAttributedString.Key.font: UIFont.systemFont(ofSize: 14.0)]
+        )
         let width: CGFloat = size.width + 16
         return CGSize(width: width, height: 30)
     }
-
 }
